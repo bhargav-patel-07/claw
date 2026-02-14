@@ -1,0 +1,9 @@
+{
+  "name": "@repo/db",
+  "main": "src/client.ts",
+  "types": "src/client.ts",
+  "dependencies": {
+    "@prisma/client": "^7.4.0",
+    "prisma": "^7.4.0"
+  }
+}
