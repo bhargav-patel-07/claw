@@ -1,59 +1,54 @@
-import NextAuth from "next-auth"
-import Credentials from "next-auth/providers/credentials"
-import Google from "next-auth/providers/google"
+import type { NextAuthOptions } from "next-auth"
 import GitHub from "next-auth/providers/github"
+import Credentials from "next-auth/providers/credentials"
 import { PrismaAdapter } from "@auth/prisma-adapter"
-import { PrismaClient } from "../../packages/db/generated/prisma"
 import bcrypt from "bcryptjs"
+import { db } from "@repo/db"
 
-const prisma = new PrismaClient()
-
-export const { handlers, auth, signIn, signOut } = NextAuth({
-  adapter: PrismaAdapter(prisma),
-
-  session: {
-    strategy: "jwt",
-  },
+export const authOptions: NextAuthOptions = {
+  adapter: PrismaAdapter(db),
+  session: { strategy: "jwt" },
+  secret: process.env.AUTH_SECRET,
 
   providers: [
-    // 🔐 Credentials Login
+    // 🐙 GitHub OAuth
+    GitHub({
+      clientId: process.env.AUTH_GITHUB_ID!,
+      clientSecret: process.env.AUTH_GITHUB_SECRET!,
+    }),
+
+    // 🔐 Credentials
     Credentials({
       credentials: {
         email: {},
         password: {},
       },
       async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) {
+        if (!credentials?.email || !credentials?.password)
           return null
-        }
 
-        const user = await prisma.user.findUnique({
-          where: { email: credentials.email },
+        const normalizedEmail = credentials.email.trim().toLowerCase()
+
+        const user = await db.user.findUnique({
+          where: { email: normalizedEmail },
         })
 
-        if (!user || !user.password) return null
+        if (!user?.password) return null
 
-        const isValid = await bcrypt.compare(
+        const valid = await bcrypt.compare(
           credentials.password,
           user.password
         )
 
-        if (!isValid) return null
+        if (!valid) return null
 
-        return user
+        return {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          image: user.image,
+        }
       },
     }),
-
-    // 🌐 Google
-    Google({
-      clientId: process.env.AUTH_GOOGLE_ID!,
-      clientSecret: process.env.AUTH_GOOGLE_SECRET!,
-    }),
-
-    // 🐙 GitHub
-    GitHub({
-      clientId: process.env.AUTH_GITHUB_ID!,
-      clientSecret: process.env.AUTH_GITHUB_SECRET!,
-    }),
   ],
-})
+}

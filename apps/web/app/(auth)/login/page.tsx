@@ -1,16 +1,19 @@
 "use client"
 
-import { signIn } from "next-auth/react"
 import { useState } from "react"
+import { signIn } from "next-auth/react"
 import { useRouter } from "next/navigation"
 
 export default function LoginPage() {
   const router = useRouter()
+
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [error, setError] = useState("")
 
-  const handleCredentialsLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
+    setError("")
 
     const res = await signIn("credentials", {
       email,
@@ -20,51 +23,52 @@ export default function LoginPage() {
 
     if (!res?.error) {
       router.push("/dashboard")
+      return
     }
+
+    setError("Invalid email or password")
   }
 
   return (
-    <div className="flex flex-col items-center mt-20">
-      <h1 className="text-2xl font-bold mb-6">Login</h1>
+    <div className="flex flex-col items-center mt-20 gap-4">
+      <h1 className="text-2xl font-bold">Login</h1>
 
-      {/* 🔐 Credentials Login */}
-      <form
-        onSubmit={handleCredentialsLogin}
-        className="flex flex-col gap-4 w-80"
-      >
+      <form onSubmit={handleLogin} className="flex flex-col gap-3 w-80">
         <input
           type="email"
           placeholder="Email"
-          onChange={(e) => setEmail(e.target.value)}
           className="border p-2 rounded"
+          onChange={(e) => setEmail(e.target.value)}
         />
+
         <input
           type="password"
           placeholder="Password"
-          onChange={(e) => setPassword(e.target.value)}
           className="border p-2 rounded"
+          onChange={(e) => setPassword(e.target.value)}
         />
+
         <button className="bg-black text-white p-2 rounded">
-          Login with Email
+          Login
         </button>
       </form>
 
-      <div className="my-6">OR</div>
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
-      {/* 🌐 Google Login */}
-      <button
-        onClick={() => signIn("google")}
-        className="bg-red-500 text-white p-2 rounded w-80 mb-3"
-      >
-        Continue with Google
-      </button>
+      <div className="text-sm text-gray-500">OR</div>
 
-      {/* 🐙 GitHub Login */}
       <button
         onClick={() => signIn("github")}
         className="bg-gray-800 text-white p-2 rounded w-80"
       >
         Continue with GitHub
+      </button>
+
+      <button
+        onClick={() => router.push("/reset-password")}
+        className="text-sm text-blue-600"
+      >
+        Forgot Password?
       </button>
     </div>
   )

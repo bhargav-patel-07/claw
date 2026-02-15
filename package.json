@@ -1,6 +1,11 @@
 {
   "name": "claw",
   "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "description": "",
   "homepage": "https://github.com/bhargav-patel-07/claw#readme",
   "bugs": {
@@ -16,5 +21,14 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.90.21",
+    "@trpc/client": "^11.10.0",
+    "@trpc/react-query": "^11.10.0",
+    "@trpc/server": "^11.10.0",
+    "bcrypt": "^6.0.0",
+    "superjson": "^2.2.6",
+    "zod": "^4.3.6"
   }
 }

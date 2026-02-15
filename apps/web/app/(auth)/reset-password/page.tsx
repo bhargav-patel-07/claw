@@ -1,31 +1,46 @@
 "use client"
 
 import { useState } from "react"
+import { trpc } from "@/utils/trpc"
+import { useRouter } from "next/navigation"
 
 export default function ResetPasswordPage() {
-  const [email, setEmail] = useState("")
+  const router = useRouter()
+  const mutation = trpc.auth.resetPassword.useMutation()
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const [email, setEmail] = useState("")
+  const [newPassword, setNewPassword] = useState("")
+
+  const handleReset = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    await fetch("/api/reset-password", {
-      method: "POST",
-      body: JSON.stringify({ email }),
-    })
+    await mutation.mutateAsync({ email, newPassword })
+
+    router.push("/login")
   }
 
   return (
-    <div className="flex flex-col items-center mt-20">
-      <h1 className="text-2xl font-bold mb-4">Reset Password</h1>
+    <div className="flex flex-col items-center mt-20 gap-4">
+      <h1 className="text-2xl font-bold">Reset Password</h1>
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4 w-80">
+      <form onSubmit={handleReset} className="flex flex-col gap-3 w-80">
         <input
           type="email"
-          placeholder="Enter your email"
+          placeholder="Email"
+          className="border p-2 rounded"
           onChange={(e) => setEmail(e.target.value)}
-          className="border p-2"
         />
-        <button className="bg-black text-white p-2">Send Reset Link</button>
+
+        <input
+          type="password"
+          placeholder="New Password"
+          className="border p-2 rounded"
+          onChange={(e) => setNewPassword(e.target.value)}
+        />
+
+        <button className="bg-black text-white p-2 rounded">
+          Reset Password
+        </button>
       </form>
     </div>
   )

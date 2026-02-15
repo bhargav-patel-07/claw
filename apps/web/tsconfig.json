@@ -18,8 +18,11 @@
         "name": "next"
       }
     ],
+    "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@repo/db": ["../../packages/db/src/client.ts"],
+      "@repo/*": ["../../packages/*/src"]
     }
   },
   "include": [

@@ -2,8 +2,13 @@
   "name": "@repo/db",
   "main": "src/client.ts",
   "types": "src/client.ts",
+  "devDependencies": {
+    "@types/pg": "^8.15.5"
+  },
   "dependencies": {
+    "@prisma/adapter-pg": "^7.4.0",
     "@prisma/client": "^7.4.0",
+    "pg": "^8.16.3",
     "prisma": "^7.4.0"
   }
 }
