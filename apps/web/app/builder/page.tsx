@@ -3,12 +3,14 @@
 import Editor from "@monaco-editor/react";
 import { FileIcon, FolderIcon, GripVerticalIcon } from "lucide-react";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import type { FileSystemTree, WebContainer, WebContainerProcess } from "@webcontainer/api";
 
 import { InputGroup, InputGroupButton } from "@/components/ui/input-group";
 import {
@@ -37,6 +39,10 @@ type FileTreeNode = {
   isDirectory: boolean;
   children: FileTreeNode[];
 };
+
+type FileNode = { file: { contents: string } };
+type DirectoryNode = { directory: FileSystemTree };
+type FileSystemEntry = FileNode | DirectoryNode;
 
 const INPUT_WIDTH = 720;
 const DEFAULT_CODE = `// Start building\nexport default function App() {\n  return <h1>Hello Bhargav</h1>;\n}`;
@@ -159,6 +165,40 @@ function buildFileTree(files: GeneratedFile[]): FileTreeNode[] {
   return sortNodes(root.children);
 }
 
+function toFileSystemTree(files: GeneratedFile[]): FileSystemTree {
+  const root: FileSystemTree = {};
+
+  for (const file of files) {
+    const parts = file.path.split("/").filter(Boolean);
+
+    if (parts.length === 0) {
+      continue;
+    }
+
+    let currentDir = root;
+
+    for (let index = 0; index < parts.length; index += 1) {
+      const part = parts[index];
+      const isFile = index === parts.length - 1;
+      const entries = currentDir as Record<string, FileSystemEntry>;
+
+      if (isFile) {
+        entries[part] = { file: { contents: file.content } };
+        continue;
+      }
+
+      const existing = entries[part];
+      if (!existing || !("directory" in existing)) {
+        entries[part] = { directory: {} };
+      }
+
+      currentDir = (entries[part] as DirectoryNode).directory;
+    }
+  }
+
+  return root;
+}
+
 function getEditorLanguage(filePath: string | null): string {
   if (!filePath) {
     return "typescript";
@@ -186,6 +226,281 @@ function getEditorLanguage(filePath: string | null): string {
     default:
       return "plaintext";
   }
+}
+
+function resolveStartCommand(files: GeneratedFile[]): string[] | null {
+  const packageJson = files.find((file) => file.path === "package.json");
+  if (!packageJson) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(packageJson.content) as {
+      scripts?: Record<string, string>;
+    };
+
+    if (parsed.scripts?.dev) {
+      return ["npm", "run", "dev", "--", "--host", "0.0.0.0"];
+    }
+
+    if (parsed.scripts?.start) {
+      return ["npm", "run", "start"];
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function sanitizeFilesForWebContainer(
+  files: GeneratedFile[],
+): { files: GeneratedFile[]; removedDeps: string[] } {
+  const packageIndex = files.findIndex((file) => file.path === "package.json");
+  if (packageIndex === -1) {
+    return { files, removedDeps: [] };
+  }
+
+  const nextFiles = [...files];
+  const removedDeps: string[] = [];
+
+  try {
+    const parsed = JSON.parse(nextFiles[packageIndex].content) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
+      optionalDependencies?: Record<string, string>;
+    };
+
+    const sanitizeBlock = (
+      block?: Record<string, string>,
+    ): Record<string, string> | undefined => {
+      if (!block) return block;
+
+      const entries = Object.entries(block).filter(([name, version]) => {
+        const isLocal =
+          name.startsWith("@repo/") ||
+          version.startsWith("workspace:") ||
+          version.startsWith("file:") ||
+          version.startsWith("link:");
+
+        if (isLocal) {
+          removedDeps.push(`${name}@${version}`);
+        }
+
+        return !isLocal;
+      });
+
+      return Object.fromEntries(entries);
+    };
+
+    parsed.dependencies = sanitizeBlock(parsed.dependencies);
+    parsed.devDependencies = sanitizeBlock(parsed.devDependencies);
+    parsed.peerDependencies = sanitizeBlock(parsed.peerDependencies);
+    parsed.optionalDependencies = sanitizeBlock(parsed.optionalDependencies);
+
+    nextFiles[packageIndex] = {
+      ...nextFiles[packageIndex],
+      content: `${JSON.stringify(parsed, null, 2)}\n`,
+    };
+  } catch {
+    return { files, removedDeps: [] };
+  }
+
+  return { files: nextFiles, removedDeps };
+}
+
+function withSafeReactPreviewScaffold(files: GeneratedFile[]): GeneratedFile[] {
+  const fileMap = new Map(files.map((file) => [file.path, file.content]));
+
+  const safePackageJson = `{
+  "name": "webcontainer-preview",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.5.3",
+    "vite": "^5.4.2"
+  }
+}
+`;
+
+  const safeViteConfig = `import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+});
+`;
+
+  const safeIndexHtml = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Preview</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+`;
+
+  const safeMainTsx = `import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+`;
+
+  const safeAppTsx = `export default function App() {
+  return <div style={{ padding: 24 }}>Preview ready</div>;
+}
+`;
+
+  fileMap.set("package.json", safePackageJson);
+  if (!fileMap.has("vite.config.ts") && !fileMap.has("vite.config.js")) {
+    fileMap.set("vite.config.ts", safeViteConfig);
+  }
+  if (!fileMap.has("index.html")) {
+    fileMap.set("index.html", safeIndexHtml);
+  }
+  if (!fileMap.has("src/main.tsx") && !fileMap.has("src/main.jsx")) {
+    fileMap.set("src/main.tsx", safeMainTsx);
+  }
+  if (!fileMap.has("src/App.tsx") && !fileMap.has("src/App.jsx")) {
+    fileMap.set("src/App.tsx", safeAppTsx);
+  }
+
+  const blocked = new Set([
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "bun.lockb",
+  ]);
+
+  return Array.from(fileMap.entries())
+    .filter(([path]) => !blocked.has(path))
+    .map(([path, content]) => ({ path, content }));
+}
+
+function extractPackageName(specifier: string): string | null {
+  if (
+    !specifier ||
+    specifier.startsWith(".") ||
+    specifier.startsWith("/") ||
+    specifier.startsWith("http")
+  ) {
+    return null;
+  }
+
+  if (specifier.startsWith("@")) {
+    const [scope, name] = specifier.split("/");
+    if (!scope || !name) return null;
+    return `${scope}/${name}`;
+  }
+
+  return specifier.split("/")[0] || null;
+}
+
+function collectImportedPackages(files: GeneratedFile[]): Set<string> {
+  const packages = new Set<string>();
+  const sourceFilePattern = /\.(tsx|ts|jsx|js|mjs|cjs)$/i;
+  const importPattern =
+    /\b(?:import|export)\s+(?:[^"'`]*?\s+from\s+)?["'`]([^"'`]+)["'`]/g;
+  const dynamicImportPattern = /\bimport\(\s*["'`]([^"'`]+)["'`]\s*\)/g;
+
+  for (const file of files) {
+    if (!sourceFilePattern.test(file.path)) {
+      continue;
+    }
+
+    for (const pattern of [importPattern, dynamicImportPattern]) {
+      pattern.lastIndex = 0;
+      let match = pattern.exec(file.content);
+      while (match) {
+        const packageName = extractPackageName(match[1]);
+        if (packageName && packageName !== "react" && packageName !== "react-dom") {
+          packages.add(packageName);
+        }
+        match = pattern.exec(file.content);
+      }
+    }
+  }
+
+  return packages;
+}
+
+function ensureDependenciesForImports(
+  files: GeneratedFile[],
+  importedPackages: Set<string>,
+): { files: GeneratedFile[]; addedDeps: string[] } {
+  if (importedPackages.size === 0) {
+    return { files, addedDeps: [] };
+  }
+
+  const packageIndex = files.findIndex((file) => file.path === "package.json");
+  if (packageIndex === -1) {
+    return { files, addedDeps: [] };
+  }
+
+  const nextFiles = [...files];
+  const addedDeps: string[] = [];
+
+  try {
+    const parsed = JSON.parse(nextFiles[packageIndex].content) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
+      optionalDependencies?: Record<string, string>;
+    };
+
+    const dependencies = parsed.dependencies ?? {};
+    const devDependencies = parsed.devDependencies ?? {};
+    const peerDependencies = parsed.peerDependencies ?? {};
+    const optionalDependencies = parsed.optionalDependencies ?? {};
+
+    for (const dep of importedPackages) {
+      if (
+        dependencies[dep] ||
+        devDependencies[dep] ||
+        peerDependencies[dep] ||
+        optionalDependencies[dep]
+      ) {
+        continue;
+      }
+
+      dependencies[dep] = "latest";
+      addedDeps.push(`${dep}@latest`);
+    }
+
+    parsed.dependencies = dependencies;
+    nextFiles[packageIndex] = {
+      ...nextFiles[packageIndex],
+      content: `${JSON.stringify(parsed, null, 2)}\n`,
+    };
+  } catch {
+    return { files, addedDeps: [] };
+  }
+
+  return { files: nextFiles, addedDeps };
 }
 
 function FileTree({
@@ -302,6 +617,11 @@ function FloatingInput({
 
 export default function BuilderPage() {
   const inputRef = useRef<HTMLDivElement>(null);
+  const webContainerRef = useRef<WebContainer | null>(null);
+  const devProcessRef = useRef<WebContainerProcess | null>(null);
+  const runIdRef = useRef(0);
+  const filesRef = useRef<GeneratedFile[]>([]);
+
   const [prompt, setPrompt] = useState("");
   const [code, setCode] = useState(DEFAULT_CODE);
   const [position, setPosition] = useState<Position | null>(null);
@@ -313,9 +633,17 @@ export default function BuilderPage() {
   const [rightTab, setRightTab] = useState<RightTab>("code");
   const [generatedFiles, setGeneratedFiles] = useState<GeneratedFile[]>([]);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
+  const [previewStatus, setPreviewStatus] = useState("Preview is idle");
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLogs, setPreviewLogs] = useState("");
+  const [previewTrigger, setPreviewTrigger] = useState(0);
 
   const fileTree = useMemo(() => buildFileTree(generatedFiles), [generatedFiles]);
   const editorLanguage = useMemo(() => getEditorLanguage(selectedFilePath), [selectedFilePath]);
+
+  useEffect(() => {
+    filesRef.current = generatedFiles;
+  }, [generatedFiles]);
 
   useEffect(() => {
     function onPointerMove(event: PointerEvent) {
@@ -370,6 +698,234 @@ export default function BuilderPage() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      runIdRef.current += 1;
+      devProcessRef.current?.kill();
+      webContainerRef.current?.teardown();
+      devProcessRef.current = null;
+      webContainerRef.current = null;
+    };
+  }, []);
+
+  const ensureWebContainer = useCallback(async (): Promise<WebContainer> => {
+    if (!window.crossOriginIsolated) {
+      throw new Error(
+        "crossOriginIsolated=false. Restart Next.js after COOP/COEP headers and open on localhost.",
+      );
+    }
+
+    if (webContainerRef.current) {
+      return webContainerRef.current;
+    }
+
+    setPreviewStatus("Booting WebContainer...");
+
+    const { WebContainer: WebContainerApi } = await import("@webcontainer/api");
+    const container = await WebContainerApi.boot();
+
+    container.on("server-ready", (_port, url) => {
+      setPreviewUrl(url);
+      setPreviewStatus(`Preview ready at ${url}`);
+    });
+
+    webContainerRef.current = container;
+    return container;
+  }, []);
+
+  const runPreview = useCallback(async (files: GeneratedFile[]) => {
+    const runId = runIdRef.current + 1;
+    runIdRef.current = runId;
+
+    setPreviewUrl(null);
+    setPreviewLogs("");
+    setPreviewStatus("Preparing preview files...");
+
+    try {
+      const appendLog = (line: string) => {
+        setPreviewLogs((previous) => {
+          const next = `${previous}${line}`;
+          return next.length > 12000 ? next.slice(-12000) : next;
+        });
+      };
+
+      const runCommand = async (
+        container: WebContainer,
+        cmd: string,
+        args: string[],
+      ): Promise<number> => {
+        appendLog(`$ ${cmd} ${args.join(" ")}\n`);
+        const process = await container.spawn(cmd, args);
+        void process.output
+          .pipeTo(
+            new WritableStream({
+              write(data) {
+                appendLog(String(data));
+              },
+            }),
+          )
+          .catch(() => {});
+        return process.exit;
+      };
+
+      const container = await ensureWebContainer();
+      if (runId !== runIdRef.current) {
+        return;
+      }
+
+      if (devProcessRef.current) {
+        devProcessRef.current.kill();
+        devProcessRef.current = null;
+      }
+
+      const sanitized = sanitizeFilesForWebContainer(files);
+      if (sanitized.removedDeps.length > 0) {
+        appendLog(
+          `Sanitized local/workspace dependencies for preview:\n${sanitized.removedDeps.join("\n")}\n\n`,
+        );
+      }
+
+      const importedPackages = collectImportedPackages(sanitized.files);
+      const withImportDeps = ensureDependenciesForImports(
+        sanitized.files,
+        importedPackages,
+      );
+      if (withImportDeps.addedDeps.length > 0) {
+        appendLog(
+          `Added missing dependencies from imports:\n${withImportDeps.addedDeps.join("\n")}\n\n`,
+        );
+      }
+
+      await container.mount(toFileSystemTree(withImportDeps.files));
+      if (runId !== runIdRef.current) {
+        return;
+      }
+
+      setPreviewStatus("Installing dependencies...");
+      let previewFiles = withImportDeps.files;
+      let installExitCode = await runCommand(container, "npm", [
+        "install",
+        "--omit=optional",
+        "--no-audit",
+        "--no-fund",
+      ]);
+
+      if (installExitCode !== 0) {
+        appendLog(
+          "\nPrimary install failed, retrying with --legacy-peer-deps...\n",
+        );
+        installExitCode = await runCommand(container, "npm", [
+          "install",
+          "--omit=optional",
+          "--legacy-peer-deps",
+          "--no-audit",
+          "--no-fund",
+        ]);
+      }
+
+      if (installExitCode !== 0) {
+        appendLog(
+          "\nSecond install failed, retrying with --force --legacy-peer-deps...\n",
+        );
+        installExitCode = await runCommand(container, "npm", [
+          "install",
+          "--omit=optional",
+          "--force",
+          "--legacy-peer-deps",
+          "--no-audit",
+          "--no-fund",
+        ]);
+      }
+
+      if (installExitCode !== 0) {
+        appendLog(
+          "\nInstall failed after retries. Switching to safe React+TSX preview scaffold...\n",
+        );
+        previewFiles = withSafeReactPreviewScaffold(sanitized.files);
+        await container.mount(toFileSystemTree(previewFiles));
+        installExitCode = await runCommand(container, "npm", [
+          "install",
+          "--omit=optional",
+          "--legacy-peer-deps",
+          "--no-audit",
+          "--no-fund",
+        ]);
+      }
+
+      if (installExitCode !== 0) {
+        throw new Error("Dependency installation failed even with safe scaffold");
+      }
+
+      if (runId !== runIdRef.current) {
+        return;
+      }
+
+      setPreviewStatus("Starting dev server...");
+      let command = resolveStartCommand(previewFiles);
+      if (!command) {
+        appendLog(
+          "\nNo dev/start script found. Switching to safe React+TSX preview scaffold...\n",
+        );
+        previewFiles = withSafeReactPreviewScaffold(previewFiles);
+        await container.mount(toFileSystemTree(previewFiles));
+
+        installExitCode = await runCommand(container, "npm", [
+          "install",
+          "--omit=optional",
+          "--legacy-peer-deps",
+          "--no-audit",
+          "--no-fund",
+        ]);
+
+        if (installExitCode !== 0) {
+          throw new Error("Safe scaffold install failed");
+        }
+
+        command = resolveStartCommand(previewFiles);
+        if (!command) {
+          throw new Error("No dev/start script even after safe scaffold");
+        }
+      }
+
+      const [cmd, ...args] = command;
+      appendLog(`$ ${cmd} ${args.join(" ")}\n`);
+      const devProcess = await container.spawn(cmd, args);
+      devProcessRef.current = devProcess;
+
+      void devProcess.output
+        .pipeTo(
+          new WritableStream({
+            write(data) {
+              appendLog(String(data));
+            },
+          }),
+        )
+        .catch(() => {
+          // process output stream closes when process exits
+        });
+    } catch (previewError: unknown) {
+      const message =
+        previewError instanceof Error
+          ? previewError.message
+          : "Unknown preview error";
+      setPreviewStatus(`Preview failed: ${message}`);
+    }
+  }, [ensureWebContainer]);
+
+  useEffect(() => {
+    if (rightTab !== "preview") {
+      return;
+    }
+
+    if (filesRef.current.length === 0) {
+      setPreviewStatus("Generate files first to start preview");
+      return;
+    }
+
+    void runPreview(filesRef.current);
+    // previewTrigger allows manual refresh/re-run for current files
+  }, [rightTab, previewTrigger, runPreview]);
+
   async function onSubmitPrompt() {
     const nextPrompt = prompt.trim();
 
@@ -420,6 +976,10 @@ export default function BuilderPage() {
       setCode(firstFile.content);
       setLeftTab("files");
       setRightTab("code");
+      setPreviewStatus("Preview is ready to run");
+      setPreviewUrl(null);
+      setPreviewLogs("");
+      setPreviewTrigger((value) => value + 1);
     } catch (submitError: unknown) {
       const message =
         submitError instanceof Error
@@ -505,11 +1065,23 @@ export default function BuilderPage() {
                   </ToggleGroupItem>
                 </ToggleGroup>
 
-                {selectedFilePath ? (
-                  <p className="max-w-[60%] truncate text-sm text-muted-foreground">
-                    {selectedFilePath}
-                  </p>
-                ) : null}
+                <div className="flex items-center gap-3">
+                  {selectedFilePath && rightTab === "code" ? (
+                    <p className="max-w-[60%] truncate text-sm text-muted-foreground">
+                      {selectedFilePath}
+                    </p>
+                  ) : null}
+
+                  {rightTab === "preview" ? (
+                    <button
+                      type="button"
+                      onClick={() => setPreviewTrigger((value) => value + 1)}
+                      className="rounded border px-2 py-1 text-xs"
+                    >
+                      Reload Preview
+                    </button>
+                  ) : null}
+                </div>
               </div>
             </ResizablePanel>
             <ResizableHandle />
@@ -545,9 +1117,18 @@ export default function BuilderPage() {
                       scrollBeyondLastLine: false,
                     }}
                   />
+                ) : previewUrl ? (
+                  <iframe
+                    title="WebContainer Preview"
+                    src={previewUrl}
+                    className="h-full w-full rounded border bg-white"
+                  />
                 ) : (
-                  <div className="flex h-full items-center justify-center rounded bg-white/90 text-sm text-muted-foreground">
-                    Preview panel coming next.
+                  <div className="flex h-full flex-col rounded bg-white/90 p-4">
+                    <p className="text-sm text-muted-foreground">{previewStatus}</p>
+                    <pre className="mt-3 min-h-0 flex-1 overflow-auto rounded border bg-black/90 p-3 text-xs text-green-300">
+                      {previewLogs || "Waiting for preview logs..."}
+                    </pre>
                   </div>
                 )}
               </div>
