@@ -144,8 +144,8 @@ export default function Ai04({
 
   return (
     <div className="mx-auto flex w-full flex-col gap-4">
-      <h1 className="text-balance text-pretty text-center font-heading font-semibold text-[29px] text-foreground tracking-tighter sm:text-[32px] md:text-[46px]">
-        Prompt. Refine. Ship.
+      <h1 className="text-balance text-pretty text-center font-heading font-semibold text-[29px] text-white tracking-tighter sm:text-[32px] md:text-[46px]">
+        Build what you think should exist
       </h1>
       <h2 className="text-balance -my-5 pb-4 text-center text-xl text-muted-foreground">
         Build real, working software just by describing it
@@ -153,7 +153,7 @@ export default function Ai04({
 
       <div className="relative z-10 flex flex-col w-full mx-auto max-w-2xl content-center">
         <form
-          className="overflow-visible rounded-xl border p-2 transition-colors duration-200 focus-within:border-ring"
+          className="overflow-visible rounded-xl bg-white border p-2 transition-colors duration-200 focus-within:border-ring"
           onDragLeave={handleDragLeave}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
@@ -197,7 +197,7 @@ export default function Ai04({
             </div>
           )}
           <Textarea
-            className="max-h-50 min-h-12 resize-none rounded-none border-none bg-transparent! p-0 text-sm shadow-none focus-visible:border-transparent focus-visible:ring-0"
+            className="max-h-50 min-h-12 resize-none rounded-none border-none bg-white p-0 text-sm shadow-none focus-visible:border-transparent focus-visible:ring-0"
             onChange={handleTextareaChange}
             onKeyDown={handleKeyDown}
             placeholder="Ask anything"

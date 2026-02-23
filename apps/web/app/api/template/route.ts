@@ -14,7 +14,10 @@ export async function POST(req: Request) {
     const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
 
     if (!prompt) {
-      return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Prompt is required" },
+        { status: 400 },
+      );
     }
 
     const classification = await createChatCompletion({
@@ -29,7 +32,7 @@ export async function POST(req: Request) {
         },
       ],
       temperature: 0,
-      maxTokens: 10,
+      maxTokens: 8000,
     });
 
     const answer = normalizeTemplateType(classification.trim().toLowerCase());
