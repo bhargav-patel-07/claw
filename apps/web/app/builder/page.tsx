@@ -26,10 +26,12 @@ import type {
 import FileTree from "@/components/builder/FileTree";
 import FloatingInput from "@/components/builder/FloatingInput";
 import CodeEditor from "@/components/builder/CodeEditor";
+import PreviewBar from "@/components/builder/previewbar";
 
 import { buildFileTree } from "@/lib/builder/file-tree";
 import { parseXml } from "../../lib/builder/file-parser";
 import { runPreview } from "@/lib/builder/preview-runner";
+import Image from "next/image";
 
 const INPUT_WIDTH = 720;
 const DEFAULT_CODE = `// Start building
@@ -187,18 +189,29 @@ export default function BuilderPage() {
       <ResizablePanelGroup orientation="horizontal" className="h-full w-full">
         {/* LEFT PANEL */}
         <ResizablePanel defaultSize={15} minSize={10}>
-          <div className="flex h-full flex-col">
-            <ToggleGroup
-              variant="outline"
-              type="single"
-              value={leftTab}
-              onValueChange={(value) => value && setLeftTab(value as LeftTab)}
-            >
-              <ToggleGroupItem value="files">Files</ToggleGroupItem>
-              <ToggleGroupItem value="chat">Chat</ToggleGroupItem>
-            </ToggleGroup>
+          <div className="flex items-center justify-center p-4 pb-0">
+            <Image
+              src="/logo.png"
+              alt="Logo"
+              width={80}
+              height={80}
+              className="h-10 w-auto shrink-0 object-contain"
+            />
+          </div>
+          <div className="flex h-full item-center flex-col border mt-5">
+            <div className="flex items-center justify-center mt-2">
+              <ToggleGroup
+                variant="outline"
+                type="single"
+                value={leftTab}
+                onValueChange={(value) => value && setLeftTab(value as LeftTab)}
+              >
+                <ToggleGroupItem value="files">Files</ToggleGroupItem>
+                <ToggleGroupItem value="chat">Chat</ToggleGroupItem>
+              </ToggleGroup>
+            </div>
 
-            <div className="mt-3 flex-1 overflow-auto border p-3">
+            <div className="mt-3 flex-1 overflow-auto p-3">
               {leftTab === "files" ? (
                 generatedFiles.length ? (
                   <FileTree
@@ -215,7 +228,7 @@ export default function BuilderPage() {
                   />
                 ) : (
                   <p className="text-sm text-muted-foreground">
-                    Submit a prompt to generate files.
+                    File & folder structure will appear here once generated.
                   </p>
                 )
               ) : (
@@ -245,15 +258,6 @@ export default function BuilderPage() {
                   <ToggleGroupItem value="code">Code</ToggleGroupItem>
                   <ToggleGroupItem value="preview">Preview</ToggleGroupItem>
                 </ToggleGroup>
-
-                {rightTab === "preview" && (
-                  <button
-                    onClick={() => setPreviewTrigger((v) => v + 1)}
-                    className="rounded border px-3 py-1 text-xs"
-                  >
-                    Reload Preview
-                  </button>
-                )}
               </div>
             </ResizablePanel>
 
@@ -279,20 +283,37 @@ export default function BuilderPage() {
                       );
                     }}
                   />
-                ) : previewUrl ? (
-                  <iframe
-                    src={previewUrl ?? ""}
-                    className="w-full h-full"
-                    sandbox="allow-scripts allow-same-origin allow-forms"
-                  />
                 ) : (
-                  <div className="flex h-full flex-col bg-white p-4">
-                    <p className="text-sm text-muted-foreground">
-                      {previewStatus}
-                    </p>
-                    <pre className="mt-3 flex-1 overflow-auto bg-black p-3 text-xs text-green-400">
-                      {previewLogs || "Waiting for logs..."}
-                    </pre>
+                  <div className="flex h-full flex-col bg-background p-1">
+                    {/* Preview Content */}
+                    {previewUrl ? (
+                      <div className="flex-1 overflow-auto flex justify-center p-4">
+                        <iframe
+                          src={previewUrl}
+                          className="w-full h-full rounded-lg border"
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex h-full flex-col bg-white ">
+                        <p className="text-sm text-muted-foreground">
+                          <div className="flex items-center justify-between px-4 py-2">
+                            <div className="text-sm text-muted-foreground truncate">
+                              Status : {previewStatus}
+                            </div>
+                            <PreviewBar />
+                             <button
+                    onClick={() => setPreviewTrigger((v) => v + 1)}
+                    className="rounded border px-3 py-1 text-xs"
+                  >
+                    ⭯
+                  </button>
+                          </div>
+                        </p>
+                        <pre className="mt-0 flex-1 overflow-auto bg-black p-3 text-xs text-green-400">
+                          {previewLogs || "Waiting for logs..."}
+                        </pre>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
