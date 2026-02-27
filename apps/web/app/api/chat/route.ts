@@ -1,11 +1,10 @@
-import { NextResponse } from "next/server";
-import { createChatCompletion } from "@/lib/openai";
+import { createChatCompletionStream } from "@/lib/openai";
 import { getSystemPrompt } from "../../../prompt/prompts";
 
 export async function POST(req: Request) {
   const { messages } = await req.json();
 
-  const response = await createChatCompletion({
+  const stream = await createChatCompletionStream({
     messages: [
       {
         role: "system",
@@ -15,7 +14,12 @@ export async function POST(req: Request) {
     ],
   });
 
-  return NextResponse.json({
-    response: response,
+  // 🔥 DO NOT use NextResponse.json
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
   });
 }

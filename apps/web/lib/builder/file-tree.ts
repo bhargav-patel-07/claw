@@ -10,6 +10,7 @@ export function buildFileTree(files: GeneratedFile[]): FileTreeNode[] {
     let currentLevel = root;
 
     parts.forEach((part, index) => {
+      if (!file.path || file.path.trim() === "") return;
       const isDirectory = index < parts.length - 1;
 
       let existing = currentLevel.find((n) => n.name === part);

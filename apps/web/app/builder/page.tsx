@@ -44,6 +44,15 @@ function clamp(value: number, min: number, max: number) {
 }
 
 export default function BuilderPage() {
+  const [device, setDevice] = useState<"desktop" | "tablet" | "mobile">(
+    "desktop",
+  );
+
+  const deviceWidths: Record<"desktop" | "tablet" | "mobile", string> = {
+    desktop: "100%",
+    tablet: "768px",
+    mobile: "375px",
+  };
   const inputRef = useRef<HTMLDivElement>(null);
 
   const filesRef = useRef<GeneratedFile[]>([]);
@@ -129,60 +138,87 @@ export default function BuilderPage() {
   }, [rightTab, previewTrigger]);
 
   async function onSubmitPrompt() {
-    const nextPrompt = prompt.trim();
-    if (!nextPrompt || isLoading) return;
+  const nextPrompt = prompt.trim();
+  if (!nextPrompt || isLoading) return;
 
-    setIsLoading(true);
-    setError(null);
+  setIsLoading(true);
+  setError(null);
 
-    try {
-      const response = await fetch("/api/template", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: nextPrompt }),
-      });
+  try {
+    const response = await fetch("/api/template", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: nextPrompt }),
+    });
 
-      const raw = await response.text();
-      const payload = JSON.parse(raw);
-
-      if (!response.ok) {
-        throw new Error(payload?.error || "Template generation failed");
-      }
-
-      const modelOutput =
-        typeof payload.response === "string" ? payload.response : "";
-
-      const steps = parseXml(modelOutput);
-
-      if (!steps.length) {
-        throw new Error("No steps parsed from AI response");
-      }
-
-      const first = steps[0];
-
-      setGeneratedFiles(
-        steps.map((step) => ({
-          path: step.path || "",
-          content: step.code || "",
-        })),
-      );
-      setSelectedFilePath(first.path || null);
-      setCode(first.code || "");
-
-      setLeftTab("files");
-      setRightTab("code");
-
-      setPreviewStatus("Preview ready to run");
-      setPreviewUrl(null);
-      setPreviewLogs("");
-      setPreviewTrigger((v) => v + 1);
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : "Unknown error";
-      setError(errorMessage);
-    } finally {
-      setIsLoading(false);
+    if (!response.body) {
+      throw new Error("No stream returned");
     }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    let fullOutput = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value);
+
+      const lines = chunk.split("\n");
+
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        if (line.includes("[DONE]")) break;
+
+        const json = JSON.parse(line.replace("data: ", ""));
+        const token = json.choices?.[0]?.delta?.content;
+
+        if (token) {
+          fullOutput += token;
+
+          // 🔥 Optional: show live output in editor
+          setCode(fullOutput);
+        }
+      }
+    }
+
+    // After streaming completes → parse files
+    const steps = parseXml(fullOutput);
+
+    if (!steps.length) {
+      throw new Error("No steps parsed from AI response");
+    }
+
+    const first = steps[0];
+
+    setGeneratedFiles(
+      steps.map((step) => ({
+        path: step.path || "",
+        content: step.code || "",
+      }))
+    );
+
+    setSelectedFilePath(first.path || null);
+    setCode(first.code || "");
+
+    setLeftTab("files");
+    setRightTab("code");
+
+    setPreviewStatus("Preview ready to run");
+    setPreviewUrl(null);
+    setPreviewLogs("");
+    setPreviewTrigger((v) => v + 1);
+
+  } catch (err: unknown) {
+    const errorMessage =
+      err instanceof Error ? err.message : "Unknown error";
+    setError(errorMessage);
+  } finally {
+    setIsLoading(false);
   }
+}
 
   return (
     <main className="relative h-screen w-screen overflow-hidden">
@@ -268,7 +304,7 @@ export default function BuilderPage() {
                 {rightTab === "code" ? (
                   <CodeEditor
                     code={code}
-                    language="typescript"
+                    fileName={selectedFilePath ?? ""}
                     onChange={(next) => {
                       setCode(next);
 
@@ -284,31 +320,35 @@ export default function BuilderPage() {
                     }}
                   />
                 ) : (
+                  <div className="flex items-center justify-between px-4 py-2">
+                    <div className="text-sm text-muted-foreground truncate">
+                      Status : {previewStatus}
+                    </div>
+                    <PreviewBar device={device} setDevice={setDevice} />
+                    <button
+                      onClick={() => setPreviewTrigger((v) => v + 1)}
+                      className="rounded border px-3 py-1 text-xs"
+                    >
+                      ⭯
+                    </button>
+                  </div>
+                )}
+
+                {rightTab === "preview" && (
                   <div className="flex h-full flex-col bg-background p-1">
                     {/* Preview Content */}
                     {previewUrl ? (
-                      <div className="flex-1 overflow-auto flex justify-center p-4">
+                      <div
+                        className="transition-all duration-300 bg-white shadow-lg"
+                        style={{ width: deviceWidths[device] }}
+                      >
                         <iframe
                           src={previewUrl}
-                          className="w-full h-full rounded-lg border"
+                          className="h-[800px] w-full border"
                         />
                       </div>
                     ) : (
                       <div className="flex h-full flex-col bg-white ">
-                        <p className="text-sm text-muted-foreground">
-                          <div className="flex items-center justify-between px-4 py-2">
-                            <div className="text-sm text-muted-foreground truncate">
-                              Status : {previewStatus}
-                            </div>
-                            <PreviewBar />
-                             <button
-                    onClick={() => setPreviewTrigger((v) => v + 1)}
-                    className="rounded border px-3 py-1 text-xs"
-                  >
-                    ⭯
-                  </button>
-                          </div>
-                        </p>
                         <pre className="mt-0 flex-1 overflow-auto bg-black p-3 text-xs text-green-400">
                           {previewLogs || "Waiting for logs..."}
                         </pre>
