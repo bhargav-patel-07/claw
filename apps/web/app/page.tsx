@@ -1,8 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
-import Ai04 from "@/components/homeaiInput";
-import GitButton from "@/components/ui/github";
+import Ai04 from "@/components/ui/homeaiInput";
 
 export default function Home() {
   return (
