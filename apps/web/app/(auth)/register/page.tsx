@@ -30,39 +30,98 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="flex flex-col items-center mt-20 gap-4">
-      <h1 className="text-2xl font-bold">Create Account</h1>
+<div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-3 w-80">
-        <input
-          type="email"
-          placeholder="Email"
-          className="border p-2 rounded"
-          onChange={(e) => setEmail(e.target.value)}
-        />
+  <div className="w-full max-w-md">
 
-        <input
-          type="password"
-          placeholder="Password"
-          className="border p-2 rounded"
-          onChange={(e) => setPassword(e.target.value)}
-        />
+    {/* Header */}
+    <div className="text-center mb-8">
+      <h1 className="text-3xl font-semibold text-green-900">
+        Create Account
+      </h1>
+      <p className="text-gray-500 mt-2 text-sm">
+        Start your journey with us
+      </p>
+    </div>
 
-        <button className="bg-black text-white p-2 rounded">
-          Register
+    {/* Card */}
+    <div className="bg-white border border-gray-200 
+                    rounded-2xl shadow-lg p-8">
+
+      <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+
+        {/* Email */}
+        <div className="flex flex-col gap-2">
+          <label className="text-sm font-medium text-gray-700">
+            Email
+          </label>
+          <input
+            type="email"
+            className="p-3 rounded-lg border border-gray-300
+                       focus:outline-none
+                       focus:ring-2 focus:ring-green-900
+                       focus:border-green-900
+                       transition"
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </div>
+
+        {/* Password */}
+        <div className="flex flex-col gap-2">
+          <label className="text-sm font-medium text-gray-700">
+            Password
+          </label>
+          <input
+            type="password"
+            className="p-3 rounded-lg border border-gray-300
+                       focus:outline-none
+                       focus:ring-2 focus:ring-green-900
+                       focus:border-green-900
+                       transition"
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </div>
+
+        {/* Register Button */}
+        <button
+          type="submit"
+          className="mt-2 bg-green-900 hover:bg-green-800
+                     text-white p-3 rounded-lg font-medium
+                     transition duration-200"
+        >
+          Create Account
         </button>
+
       </form>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && (
+        <p className="text-sm text-red-600 mt-4 text-center">
+          {error}
+        </p>
+      )}
 
-      <div className="text-sm text-gray-500">OR</div>
+      {/* Divider */}
+      <div className="flex items-center gap-3 my-6">
+        <div className="flex-1 h-px bg-gray-200"></div>
+        <span className="text-sm text-gray-400">OR</span>
+        <div className="flex-1 h-px bg-gray-200"></div>
+      </div>
 
+      {/* GitHub Button */}
       <button
         onClick={() => signIn("github")}
-        className="bg-gray-800 text-white p-2 rounded w-80"
+        className="w-full border border-gray-300
+                   hover:border-green-900
+                   text-gray-700 hover:text-green-900
+                   p-3 rounded-lg font-medium
+                   transition duration-200"
       >
         Continue with GitHub
       </button>
+
     </div>
+
+  </div>
+</div>
   )
 }
