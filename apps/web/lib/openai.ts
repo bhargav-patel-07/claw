@@ -42,7 +42,7 @@ export async function createChatCompletion({
         "X-Title": "AI Builder",
       },
       body: JSON.stringify({
-        model: "arcee-ai/trinity-large-preview:free",
+        model: "stepfun/step-3.5-flash:free",
         stream: false,
         messages,
         temperature,
