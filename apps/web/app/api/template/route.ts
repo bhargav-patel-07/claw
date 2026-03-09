@@ -1,39 +1,10 @@
-import { createChatCompletionStream } from "@/lib/openai";
+import { createChatCompletion } from "@/lib/openai";
 import { BASE_PROMPT, getSystemPrompt } from "@/prompt/prompts";
 import { basePrompt as reactBasePrompt } from "@/prompt/defaults/react";
 import { basePrompt as nodeBasePrompt } from "@/prompt/defaults/node";
 
 function normalizeTemplateType(value: string): "react" | "node" {
   return value === "node" ? "node" : "react";
-}
-
-async function streamToString(stream: ReadableStream<Uint8Array>) {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-
-  let fullText = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    const chunk = decoder.decode(value);
-    const lines = chunk.split("\n");
-
-    for (const line of lines) {
-      if (!line.startsWith("data:")) continue;
-      if (line.includes("[DONE]")) break;
-
-      const json = JSON.parse(line.replace("data: ", ""));
-      const token = json.choices?.[0]?.delta?.content;
-
-      if (token) {
-        fullText += token;
-      }
-    }
-  }
-
-  return fullText;
 }
 
 export async function POST(req: Request) {
@@ -45,8 +16,8 @@ export async function POST(req: Request) {
       return new Response("Prompt is required", { status: 400 });
     }
 
-    // 1️⃣ Stream classification
-    const classificationStream = await createChatCompletionStream({
+    // 1️⃣ CLASSIFY PROJECT TYPE
+    const classification = await createChatCompletion({
       messages: [
         {
           role: "system",
@@ -61,13 +32,19 @@ export async function POST(req: Request) {
       maxTokens: 10,
     });
 
-    const classificationText = await streamToString(classificationStream);
-    const answer = normalizeTemplateType(
-      classificationText.trim().toLowerCase()
-    );
+    const classificationText =
+  classification?.choices?.[0]?.message?.content;
 
-    // 2️⃣ Stream actual generation
-    const generationStream = await createChatCompletionStream({
+if (!classificationText) {
+  throw new Error("Classification failed: no response from AI");
+}
+
+const answer = normalizeTemplateType(
+  classificationText.trim().toLowerCase()
+);
+
+    // 2️⃣ GENERATE FILES
+    const generation = await createChatCompletion({
       messages: [
         {
           role: "system",
@@ -84,13 +61,11 @@ export async function POST(req: Request) {
       maxTokens: 8000,
     });
 
-    // 🔥 Return raw stream to client
-    return new Response(generationStream, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      },
+    const output = generation.choices?.[0]?.message?.content ?? "";
+
+    return Response.json({
+      output,
+      template: answer,
     });
 
   } catch (error: unknown) {

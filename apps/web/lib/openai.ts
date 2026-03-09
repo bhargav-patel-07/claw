@@ -9,12 +9,24 @@ export type ChatCompletionOptions = {
   maxTokens?: number;
 };
 
-export async function createChatCompletionStream({
+type OpenRouterChoice = {
+  message: {
+    role: string;
+    content: string;
+  };
+};
+
+type OpenRouterResponse = {
+  choices: OpenRouterChoice[];
+};
+
+export async function createChatCompletion({
   messages,
   temperature = 0.2,
   maxTokens = 8000,
-}: ChatCompletionOptions) {
+}: ChatCompletionOptions): Promise<OpenRouterResponse> {
   const key = process.env.OPENROUTER_API_KEY;
+
   if (!key) {
     throw new Error("OPENROUTER_API_KEY is missing");
   }
@@ -26,12 +38,12 @@ export async function createChatCompletionStream({
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${key}`,
-        Referer: "http://localhost:3000",
+        Referer: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
         "X-Title": "AI Builder",
       },
       body: JSON.stringify({
         model: "arcee-ai/trinity-large-preview:free",
-        stream: true,
+        stream: false,
         messages,
         temperature,
         max_tokens: maxTokens,
@@ -39,9 +51,12 @@ export async function createChatCompletionStream({
     }
   );
 
-  if (!response.ok || !response.body) {
-    throw new Error("Streaming request failed");
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`OpenRouter API error: ${error}`);
   }
 
-  return response.body; // 🔥 return raw stream
+  const data: OpenRouterResponse = await response.json();
+
+  return data;
 }

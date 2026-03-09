@@ -29,11 +29,11 @@ export async function runPreview(
 
   // Inject required files if missing
   if (!files.some((f) => f.path === "package.json")) {
-    files.push({
+              files.push({
       path: "package.json",
       content: JSON.stringify(
         {
-          name: "web-preview",
+name: "web-preview",
           private: true,
           version: "0.0.0",
           type: "module",
