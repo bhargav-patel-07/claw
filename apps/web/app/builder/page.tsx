@@ -29,11 +29,12 @@ import CodeEditor from "@/components/builder/CodeEditor";
 import PreviewBar from "@/components/builder/previewbar";
 
 import { buildFileTree } from "@/lib/builder/file-tree";
-import { parseXml } from "../../lib/builder/file-parser";
+import { parseXml } from "@/lib/builder/file-parser";
 import { runPreview } from "@/lib/builder/preview-runner";
 import Image from "next/image";
 
 const INPUT_WIDTH = 720;
+
 const DEFAULT_CODE = `// Start building
 export default function App() {
   return <h1>Hello Bhargav</h1>;
@@ -45,23 +46,25 @@ function clamp(value: number, min: number, max: number) {
 
 export default function BuilderPage() {
   const [device, setDevice] = useState<"desktop" | "tablet" | "mobile">(
-    "desktop",
+    "desktop"
   );
 
-  const deviceWidths: Record<"desktop" | "tablet" | "mobile", string> = {
+  const deviceWidths = {
     desktop: "100%",
     tablet: "768px",
     mobile: "375px",
   };
-  const inputRef = useRef<HTMLDivElement>(null);
 
+  const inputRef = useRef<HTMLDivElement>(null);
   const filesRef = useRef<GeneratedFile[]>([]);
 
   const [prompt, setPrompt] = useState("");
   const [code, setCode] = useState(DEFAULT_CODE);
+
   const [position, setPosition] = useState<Position | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
+
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -76,21 +79,12 @@ export default function BuilderPage() {
   const [previewStatus, setPreviewStatus] = useState("Preview is idle");
   const [previewTrigger, setPreviewTrigger] = useState(0);
 
-  const fileTree = useMemo(() => {
-    const tree = buildFileTree(generatedFiles);
-    console.log("File Tree:", tree);
-    return tree;
-  }, [generatedFiles]);
+  const fileTree = useMemo(() => buildFileTree(generatedFiles), [generatedFiles]);
 
   useEffect(() => {
     filesRef.current = generatedFiles;
   }, [generatedFiles]);
 
-  useEffect(() => {
-    console.log("Generated Files State:", generatedFiles);
-  }, [generatedFiles]);
-
-  // Drag logic
   useEffect(() => {
     function onPointerMove(event: PointerEvent) {
       if (!isDragging) return;
@@ -121,7 +115,6 @@ export default function BuilderPage() {
     };
   }, [dragOffset, isDragging]);
 
-  // Run preview when switching tab
   useEffect(() => {
     if (rightTab !== "preview") return;
 
@@ -137,264 +130,256 @@ export default function BuilderPage() {
     });
   }, [rightTab, previewTrigger]);
 
+  // 🔥 FIXED PROMPT SUBMIT
   async function onSubmitPrompt() {
-  const nextPrompt = prompt.trim();
-  if (!nextPrompt || isLoading) return;
+    const nextPrompt = prompt.trim();
+    if (!nextPrompt || isLoading) return;
 
-  setIsLoading(true);
-  setError(null);
+    setIsLoading(true);
+    setError(null);
 
-  try {
-    const response = await fetch("/api/template", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: nextPrompt }),
-    });
+    try {
+      const response = await fetch("/api/template", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: nextPrompt }),
+      });
 
-    if (!response.body) {
-      throw new Error("No stream returned");
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-
-    let fullOutput = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = decoder.decode(value);
-
-      const lines = chunk.split("\n");
-
-      for (const line of lines) {
-        if (!line.startsWith("data:")) continue;
-        if (line.includes("[DONE]")) break;
-
-        const json = JSON.parse(line.replace("data: ", ""));
-        const token = json.choices?.[0]?.delta?.content;
-
-        if (token) {
-          fullOutput += token;
-
-          // 🔥 Optional: show live output in editor
-          setCode(fullOutput);
-        }
+      if (!response.ok) {
+        throw new Error("API request failed");
       }
+
+      const data = await response.json();
+
+      if (!data.output) {
+        console.error("AI OUTPUT:", data);
+        throw new Error("AI returned empty output");
+      }
+
+      const fullOutput = data.output;
+
+      console.log("AI RAW OUTPUT:", fullOutput);
+
+      const steps = parseXml(fullOutput);
+
+      if (!steps.length) {
+        throw new Error("No steps parsed from AI response");
+      }
+
+      const files = steps
+        .filter((s) => s.path)
+        .map((step) => ({
+          path: step.path!,
+          content: step.code || "",
+        }));
+
+      setGeneratedFiles(files);
+
+      const first = files[0];
+
+      if (first) {
+        setSelectedFilePath(first.path);
+        setCode(first.content);
+      }
+
+      setLeftTab("files");
+      setRightTab("code");
+
+      setPreviewStatus("Preview ready to run");
+      setPreviewUrl(null);
+      setPreviewLogs("");
+      setPreviewTrigger((v) => v + 1);
+
+    } catch (err: unknown) {
+      const errorMessage =
+        err instanceof Error ? err.message : "Unknown error";
+      setError(errorMessage);
+    } finally {
+      setIsLoading(false);
     }
-
-    // After streaming completes → parse files
-    const steps = parseXml(fullOutput);
-
-    if (!steps.length) {
-      throw new Error("No steps parsed from AI response");
-    }
-
-    const first = steps[0];
-
-    setGeneratedFiles(
-      steps.map((step) => ({
-        path: step.path || "",
-        content: step.code || "",
-      }))
-    );
-
-    setSelectedFilePath(first.path || null);
-    setCode(first.code || "");
-
-    setLeftTab("files");
-    setRightTab("code");
-
-    setPreviewStatus("Preview ready to run");
-    setPreviewUrl(null);
-    setPreviewLogs("");
-    setPreviewTrigger((v) => v + 1);
-
-  } catch (err: unknown) {
-    const errorMessage =
-      err instanceof Error ? err.message : "Unknown error";
-    setError(errorMessage);
-  } finally {
-    setIsLoading(false);
   }
-}
 
   return (
-    <main className="relative h-screen w-screen overflow-hidden">
-      <ResizablePanelGroup orientation="horizontal" className="h-full w-full">
-        {/* LEFT PANEL */}
-        <ResizablePanel defaultSize={15} minSize={10}>
-          <div className="flex items-center justify-center p-4 pb-0">
-            <Image
-              src="/logo.png"
-              alt="Logo"
-              width={80}
-              height={80}
-              className="h-10 w-auto shrink-0 object-contain"
-            />
+  <main className="relative h-screen w-screen overflow-hidden">
+    <ResizablePanelGroup orientation="horizontal" className="h-full w-full">
+      
+      {/* LEFT PANEL */}
+      <ResizablePanel defaultSize={15} minSize={10}>
+        <div className="flex items-center justify-center p-4 pb-0">
+          <Image
+            src="/logo.png"
+            alt="Logo"
+            width={80}
+            height={80}
+            className="h-10 w-auto shrink-0 object-contain"
+          />
+        </div>
+
+        <div className="flex h-full items-center flex-col border mt-5">
+          <div className="flex items-center justify-center mt-2">
+            <ToggleGroup
+              variant="outline"
+              type="single"
+              value={leftTab}
+              onValueChange={(value) => value && setLeftTab(value as LeftTab)}
+            >
+              <ToggleGroupItem value="files">Files</ToggleGroupItem>
+              <ToggleGroupItem value="chat">Chat</ToggleGroupItem>
+            </ToggleGroup>
           </div>
-          <div className="flex h-full item-center flex-col border mt-5">
-            <div className="flex items-center justify-center mt-2">
+
+          <div className="mt-3 flex-1 overflow-auto p-3">
+            {leftTab === "files" ? (
+              generatedFiles.length ? (
+                <FileTree
+                  nodes={fileTree}
+                  selectedPath={selectedFilePath}
+                  onSelect={(path) => {
+                    const file = generatedFiles.find((f) => f.path === path);
+                    setSelectedFilePath(path);
+                    setCode(file?.content ?? "");
+                    setRightTab("code");
+                  }}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  File & folder structure will appear here once generated.
+                </p>
+              )
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Chat view reserved for follow-ups.
+              </p>
+            )}
+          </div>
+        </div>
+      </ResizablePanel>
+
+      <ResizableHandle />
+
+      {/* RIGHT PANEL */}
+      <ResizablePanel defaultSize={85} minSize={20}>
+        <ResizablePanelGroup orientation="vertical">
+          
+          <ResizablePanel defaultSize={8} minSize={6}>
+            <div className="flex items-center justify-between p-4">
               <ToggleGroup
                 variant="outline"
                 type="single"
-                value={leftTab}
-                onValueChange={(value) => value && setLeftTab(value as LeftTab)}
+                value={rightTab}
+                onValueChange={(value) =>
+                  value && setRightTab(value as RightTab)
+                }
               >
-                <ToggleGroupItem value="files">Files</ToggleGroupItem>
-                <ToggleGroupItem value="chat">Chat</ToggleGroupItem>
+                <ToggleGroupItem value="code">Code</ToggleGroupItem>
+                <ToggleGroupItem value="preview">Preview</ToggleGroupItem>
               </ToggleGroup>
             </div>
+          </ResizablePanel>
 
-            <div className="mt-3 flex-1 overflow-auto p-3">
-              {leftTab === "files" ? (
-                generatedFiles.length ? (
-                  <FileTree
-                    nodes={fileTree}
-                    selectedPath={selectedFilePath}
-                    onSelect={(path) => {
-                      console.log("Selected File Path:", path);
-                      const file = generatedFiles.find((f) => f.path === path);
-                      console.log("File Content:", file?.content);
-                      setSelectedFilePath(path);
-                      setCode(file?.content ?? "");
-                      setRightTab("code");
-                    }}
-                  />
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    File & folder structure will appear here once generated.
-                  </p>
-                )
+          <ResizableHandle />
+
+          <ResizablePanel defaultSize={92} minSize={20}>
+            <div className="h-full w-full overflow-hidden bg-muted p-2">
+
+              {rightTab === "code" ? (
+                <CodeEditor
+                  code={code}
+                  fileName={selectedFilePath ?? ""}
+                  onChange={(next) => {
+                    setCode(next);
+
+                    if (!selectedFilePath) return;
+
+                    setGeneratedFiles((prev) =>
+                      prev.map((file) =>
+                        file.path === selectedFilePath
+                          ? { ...file, content: next }
+                          : file
+                      )
+                    );
+                  }}
+                />
               ) : (
-                <p className="text-sm text-muted-foreground">
-                  Chat view reserved for follow-ups.
-                </p>
+                <div className="flex items-center justify-between px-4 py-2">
+                  <div className="text-sm text-muted-foreground truncate">
+                    Status : {previewStatus}
+                  </div>
+
+                  <PreviewBar device={device} setDevice={setDevice} />
+
+                  <button
+                    onClick={() => setPreviewTrigger((v) => v + 1)}
+                    className="rounded border px-3 py-1 text-xs"
+                  >
+                    ⭯
+                  </button>
+                </div>
               )}
-            </div>
-          </div>
-        </ResizablePanel>
 
-        <ResizableHandle />
-
-        {/* RIGHT PANEL */}
-        <ResizablePanel defaultSize={85} minSize={20}>
-          <ResizablePanelGroup orientation="vertical">
-            <ResizablePanel defaultSize={8} minSize={6}>
-              <div className="flex items-center justify-between p-4">
-                <ToggleGroup
-                  variant="outline"
-                  type="single"
-                  value={rightTab}
-                  onValueChange={(value) =>
-                    value && setRightTab(value as RightTab)
-                  }
-                >
-                  <ToggleGroupItem value="code">Code</ToggleGroupItem>
-                  <ToggleGroupItem value="preview">Preview</ToggleGroupItem>
-                </ToggleGroup>
-              </div>
-            </ResizablePanel>
-
-            <ResizableHandle />
-
-            <ResizablePanel defaultSize={92} minSize={20}>
-              <div className="h-full w-full overflow-hidden bg-muted p-2">
-                {rightTab === "code" ? (
-                  <CodeEditor
-                    code={code}
-                    fileName={selectedFilePath ?? ""}
-                    onChange={(next) => {
-                      setCode(next);
-
-                      if (!selectedFilePath) return;
-
-                      setGeneratedFiles((prev) =>
-                        prev.map((file) =>
-                          file.path === selectedFilePath
-                            ? { ...file, content: next }
-                            : file,
-                        ),
-                      );
-                    }}
-                  />
-                ) : (
-                  <div className="flex items-center justify-between px-4 py-2">
-                    <div className="text-sm text-muted-foreground truncate">
-                      Status : {previewStatus}
-                    </div>
-                    <PreviewBar device={device} setDevice={setDevice} />
-                    <button
-                      onClick={() => setPreviewTrigger((v) => v + 1)}
-                      className="rounded border px-3 py-1 text-xs"
+              {rightTab === "preview" && (
+                <div className="flex h-full flex-col bg-background p-1">
+                  {previewUrl ? (
+                    <div
+                      className="transition-all duration-300 bg-white shadow-lg"
+                      style={{ width: deviceWidths[device] }}
                     >
-                      ⭯
-                    </button>
-                  </div>
-                )}
+                      <iframe
+                        src={previewUrl}
+                        className="h-[800px] w-full border"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex h-full flex-col bg-white">
+                      <pre className="mt-0 flex-1 overflow-auto bg-black p-3 text-xs text-green-400">
+                        {previewLogs || "Waiting for logs..."}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
 
-                {rightTab === "preview" && (
-                  <div className="flex h-full flex-col bg-background p-1">
-                    {/* Preview Content */}
-                    {previewUrl ? (
-                      <div
-                        className="transition-all duration-300 bg-white shadow-lg"
-                        style={{ width: deviceWidths[device] }}
-                      >
-                        <iframe
-                          src={previewUrl}
-                          className="h-[800px] w-full border"
-                        />
-                      </div>
-                    ) : (
-                      <div className="flex h-full flex-col bg-white ">
-                        <pre className="mt-0 flex-1 overflow-auto bg-black p-3 text-xs text-green-400">
-                          {previewLogs || "Waiting for logs..."}
-                        </pre>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        </ResizablePanel>
-      </ResizablePanelGroup>
+            </div>
+          </ResizablePanel>
 
-      {/* FLOATING INPUT */}
-      <div
-        ref={inputRef}
-        className={`absolute z-20 w-[720px] ${
-          position ? "" : "bottom-4 left-1/2 -translate-x-1/2"
-        }`}
-        style={position ? { left: position.x, top: position.y } : undefined}
-      >
-        <FloatingInput
-          prompt={prompt}
-          onPromptChange={setPrompt}
-          onSubmit={onSubmitPrompt}
-          isLoading={isLoading}
-          onDragStart={(event: ReactPointerEvent<HTMLButtonElement>) => {
-            const rect = inputRef.current?.getBoundingClientRect();
-            if (!rect) return;
+        </ResizablePanelGroup>
+      </ResizablePanel>
 
-            setDragOffset({
-              x: event.clientX - rect.left,
-              y: event.clientY - rect.top,
-            });
+    </ResizablePanelGroup>
 
-            setIsDragging(true);
-            event.currentTarget.setPointerCapture(event.pointerId);
-          }}
-        />
+    {/* FLOATING INPUT */}
+    <div
+      ref={inputRef}
+      className={`absolute z-20 w-[720px] ${
+        position ? "" : "bottom-4 left-1/2 -translate-x-1/2"
+      }`}
+      style={position ? { left: position.x, top: position.y } : undefined}
+    >
+      <FloatingInput
+        prompt={prompt}
+        onPromptChange={setPrompt}
+        onSubmit={onSubmitPrompt}
+        isLoading={isLoading}
+        onDragStart={(event: ReactPointerEvent<HTMLButtonElement>) => {
+          const rect = inputRef.current?.getBoundingClientRect();
+          if (!rect) return;
 
-        {error && (
-          <p className="mt-2 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
-          </p>
-        )}
-      </div>
-    </main>
+          setDragOffset({
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top,
+          });
+
+          setIsDragging(true);
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }}
+      />
+
+      {error && (
+        <p className="mt-2 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+    </div>
+  </main>
   );
 }

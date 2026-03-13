@@ -23,7 +23,7 @@ type OpenRouterResponse = {
 export async function createChatCompletion({
   messages,
   temperature = 0.2,
-  maxTokens = 8000,
+  maxTokens = 1200,
 }: ChatCompletionOptions): Promise<OpenRouterResponse> {
   const key = process.env.OPENROUTER_API_KEY;
 
@@ -42,7 +42,7 @@ export async function createChatCompletion({
         "X-Title": "AI Builder",
       },
       body: JSON.stringify({
-        model: "stepfun/step-3.5-flash:free",
+model: "stepfun/step-3.5-flash:free",
         stream: false,
         messages,
         temperature,

@@ -4,7 +4,8 @@ import { basePrompt as reactBasePrompt } from "@/prompt/defaults/react";
 import { basePrompt as nodeBasePrompt } from "@/prompt/defaults/node";
 
 function normalizeTemplateType(value: string): "react" | "node" {
-  return value === "node" ? "node" : "react";
+  if (value.includes("node")) return "node";
+  return "react";
 }
 
 export async function POST(req: Request) {
@@ -16,34 +17,37 @@ export async function POST(req: Request) {
       return new Response("Prompt is required", { status: 400 });
     }
 
-    // 1️⃣ CLASSIFY PROJECT TYPE
+    // -----------------------------
+    // STEP 1: CLASSIFY TEMPLATE
+    // -----------------------------
     const classification = await createChatCompletion({
       messages: [
         {
           role: "system",
-          content: "Return either node or react. Only return one word.",
+          content:
+            "Return either 'node' or 'react'. Only return one word with no explanation.",
         },
-        {
-          role: "user",
-          content: prompt,
-        },
+        { role: "user", content: prompt },
       ],
       temperature: 0,
-      maxTokens: 10,
+      maxTokens: 500,
     });
 
+    console.log("Classification response:", classification);
+
     const classificationText =
-  classification?.choices?.[0]?.message?.content;
+      classification?.choices?.[0]?.message?.content ||
+      (classification as any)?.choices?.[0]?.text ||
+      "";
 
-if (!classificationText) {
-  throw new Error("Classification failed: no response from AI");
-}
+    // fallback if model response is weird
+    const answer = normalizeTemplateType(
+      classificationText.trim().toLowerCase()
+    );
 
-const answer = normalizeTemplateType(
-  classificationText.trim().toLowerCase()
-);
-
-    // 2️⃣ GENERATE FILES
+    // -----------------------------
+    // STEP 2: GENERATE TEMPLATE
+    // -----------------------------
     const generation = await createChatCompletion({
       messages: [
         {
@@ -58,20 +62,44 @@ const answer = normalizeTemplateType(
         },
       ],
       temperature: 0.2,
-      maxTokens: 8000,
+      maxTokens: 10000,
     });
 
-    const output = generation.choices?.[0]?.message?.content ?? "";
+    console.log("Generation response:", generation);
 
-    return Response.json({
-      output,
-      template: answer,
-    });
+    if (!generation?.choices?.length) {
+      throw new Error("AI returned no output");
+    }
 
-  } catch (error: unknown) {
-    const message =
-      error instanceof Error ? error.message : "Unexpected server error";
+    const output =
+      generation?.choices?.[0]?.message?.content ||
+      (generation as any)?.choices?.[0]?.text ||
+      "";
 
-    return new Response(message, { status: 500 });
+    if (!output) {
+      throw new Error("AI response was empty");
+    }
+
+    return new Response(
+      JSON.stringify({
+        output,
+        template: answer,
+      }),
+      {
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  } catch (error) {
+    console.error("Template API Error:", error);
+
+    return new Response(
+      JSON.stringify({
+        error: error instanceof Error ? error.message : "Server error",
+      }),
+      {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
   }
 }

@@ -1,9 +1,10 @@
 export function stripIndents(value: string): string;
-export function stripIndents(strings: TemplateStringsArray, ...values: readonly unknown[]): string;
-export function stripIndents(arg0: string | TemplateStringsArray, ...values: readonly unknown[]): string {
+export function stripIndents(strings: TemplateStringsArray, ...values: any[]): string;
+export function stripIndents(arg0: string | TemplateStringsArray, ...values: any[]) {
   if (typeof arg0 !== 'string') {
     const processedString = arg0.reduce((acc, curr, i) => {
-      return acc + curr + String(values[i] ?? '');
+      acc += curr + (values[i] ?? '');
+      return acc;
     }, '');
 
     return _stripIndents(processedString);
@@ -12,7 +13,7 @@ export function stripIndents(arg0: string | TemplateStringsArray, ...values: rea
   return _stripIndents(arg0);
 }
 
-function _stripIndents(value: string): string {
+function _stripIndents(value: string) {
   return value
     .split('\n')
     .map((line) => line.trim())
